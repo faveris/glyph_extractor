@@ -1,9 +1,15 @@
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageFont, ImageDraw
+import argparse
 import operator
 
-fontPath = "FirefoxEmoji.ttf"
-size = 100
+parser = argparse.ArgumentParser()
+parser.add_argument('font', type=str, help='Path to the font file')
+parser.add_argument('--size', type=int, help='Preferable font size', default=100)
+args = parser.parse_args()
+
+fontPath = args.font
+size = args.size
 
 def bleed(img):
     pixels = img.load()
