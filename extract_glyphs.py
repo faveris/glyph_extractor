@@ -21,8 +21,6 @@ size = args.size
 colored = not args.no_embed_color
 fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
 
-print(f"Colored: {colored}, fill: {fillColor}")
-
 def bleed(img):
     pixels = img.load()
     edge = set()
@@ -68,16 +66,48 @@ def convertBoundingBox(bbox):
     y_max = y + bbox[3]
     return (x, y, x_max, y_max)
 
-namePattern = re.compile(r'(u|uni)(?P<name>[0-9a-fA-F]+)(?P<subname>_.*)?')
+namePattern = re.compile(r'(u|uni)(?P<name>[0-9a-fA-F]+)(?P<subname>.*)')
 def parseName(name):
     match = namePattern.search(name)
     if match != None:
         groups = match.groupdict()
         if 'name' in groups:
             integer = int(groups['name'], 16)
-            if 'subname' in groups:
-                subname = groups['subname']
+            subname = groups['subname'] or ''
             return (integer, subname)
+
+def readSbix(ttfont, glyphs):
+    sbix = ttfont.get("sbix")
+    if sbix != None:
+        sizes = list(sbix.strikes.keys())
+        sizes.sort()
+        
+        global size
+        size = next((x for x in sizes if x >= size), None)
+        if size == None:
+            print(f"Can't open the font with size {args.size}. Possible sizes: {', '.join([str(value) for value in sizes])}", file=sys.stderr)
+            sys.exit(1)
+
+        if size != args.size:
+            print(f"Using font size {size}")
+
+        if not colored:
+            return
+
+        for glyph in sbix.strikes[size].glyphs.values():
+            if glyph.graphicType == 'png ':
+                try:
+                    (key, subname) = parseName(glyph.glyphName)
+                    text = "" + chr(key) + subname
+                    filename = f"{hex(key) + subname}.png"
+                except:
+                    text = glyph.glyphName
+                    filename = f"{text}.png"
+                print(f"{text} -> {filename}")
+
+                with open(filename, "wb") as f: 
+                    f.write(glyph.imageData)
+                glyphs.discard(key)
 
 def extractSvg(ttfont, glyphs):
     svgs = ttfont.get("SVG ")
@@ -132,19 +162,6 @@ def extractSvg(ttfont, glyphs):
             glyphs.discard(key)
 
 with TTFont(fontPath, fontNumber=0) as ttfont:
-    imagefont = None
-    while size < args.size + 200:
-        try:
-            imagefont = ImageFont.truetype(fontPath, size)
-            print(f"Opened {fontPath} with size {size}")
-            break
-        except OSError as err:
-            size += 1
-
-    if imagefont == None:
-        print(f"Can't open the font with size {args.size} - {size}. Try use another size.", file=sys.stderr)
-        sys.exit(1)
-
     glyphs = set()
     cmap = ttfont.getBestCmap()
     for key in cmap:
@@ -152,6 +169,13 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
 
     if colored:
         extractSvg(ttfont, glyphs)
+    
+    readSbix(ttfont, glyphs)
+
+    if len(glyphs) == 0:
+        sys.exit(0);
+
+    imagefont = ImageFont.truetype(fontPath, size)
 
     for key in glyphs:
         text = "" + chr(key)
