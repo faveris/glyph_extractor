@@ -6,6 +6,7 @@ import argparse
 import io
 import operator
 import re
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('font', type=str, help='Path to the font file')
@@ -124,8 +125,18 @@ def extractSvg(ttfont, glyphs):
             glyphs.discard(key)
 
 with TTFont(fontPath, fontNumber=0) as ttfont:
-    imagefont = ImageFont.truetype(fontPath, size)
-    print(f"Opened {fontPath} with size {size}")
+    imagefont = None
+    while size < args.size + 200:
+        try:
+            imagefont = ImageFont.truetype(fontPath, size)
+            print(f"Opened {fontPath} with size {size}")
+            break
+        except OSError as err:
+            size += 1
+
+    if imagefont == None:
+        print(f"Can't open the font with size {args.size} - {size}. Try use another size.", file=sys.stderr)
+        sys.exit(1)
 
     glyphs = set()
     cmap = ttfont.getBestCmap()
