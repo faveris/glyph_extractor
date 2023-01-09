@@ -6,15 +6,22 @@ import argparse
 import io
 import operator
 import re
+import struct
 import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('font', type=str, help='Path to the font file')
 parser.add_argument('--size', type=int, help='Preferable font size', default=100)
+parser.add_argument('--no-embed-color', action='store_true', help="Don't use embedded colors of a glyph")
+parser.add_argument('--fill-color', type=str, help='Fill color in hex format', default='000000FF')
 args = parser.parse_args()
 
 fontPath = args.font
 size = args.size
+colored = not args.no_embed_color
+fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
+
+print(f"Colored: {colored}, fill: {fillColor}")
 
 def bleed(img):
     pixels = img.load()
@@ -143,7 +150,8 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
     for key in cmap:
         glyphs.add(key)
 
-    extractSvg(ttfont, glyphs)
+    if colored:
+        extractSvg(ttfont, glyphs)
 
     for key in glyphs:
         text = "" + chr(key)
@@ -160,14 +168,14 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
         img = Image.new('RGBA', size=(width, height))
         d = ImageDraw.Draw(img)
         try:
-            d.text((0, 0), text, font=imagefont, embedded_color=True)
-        except OSError:
-            print(f"{text} -> error")
+            d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
+        except OSError as err:
+            print(f"{text} -> {err}")
             continue
 
         while bleed(img): pass
         clear(img)
-        d.text((0, 0), text, font=imagefont, embedded_color=True)
+        d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
 
         print(f"{text} -> {filename}")
         img.save(filename)
