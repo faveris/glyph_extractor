@@ -5,12 +5,14 @@ import cairosvg.bounding_box
 import argparse
 import io
 import operator
+import os
 import re
 import struct
 import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('font', type=str, help='Path to the font file')
+parser.add_argument('--output', type=str, help='Path to the output folder', default='output')
 parser.add_argument('--size', type=int, help='Preferable font size', default=100)
 parser.add_argument('--no-embed-color', action='store_true', help="Don't use embedded colors of a glyph")
 parser.add_argument('--fill-color', type=str, help='Fill color in hex format', default='000000FF')
@@ -20,6 +22,10 @@ fontPath = args.font
 size = args.size
 colored = not args.no_embed_color
 fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
+outputDir = args.output
+
+if not os.path.exists(outputDir):
+    os.makedirs(outputDir)
 
 def bleed(img):
     pixels = img.load()
@@ -105,7 +111,7 @@ def readSbix(ttfont, glyphs):
                     filename = f"{text}.png"
                 print(f"{text} -> {filename}")
 
-                with open(filename, "wb") as f: 
+                with open(os.path.join(outputDir, filename), "wb") as f: 
                     f.write(glyph.imageData)
                 glyphs.discard(key)
 
@@ -156,7 +162,7 @@ def extractSvg(ttfont, glyphs):
 
             surface.finish()
 
-            with open(filename, "wb") as outfile:
+            with open(os.path.join(outputDir, filename), "wb") as outfile:
                 outfile.write(out.getbuffer())
 
             glyphs.discard(key)
@@ -202,4 +208,4 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
         d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
 
         print(f"{text} -> {filename}")
-        img.save(filename)
+        img.save(os.path.join(outputDir, filename))
