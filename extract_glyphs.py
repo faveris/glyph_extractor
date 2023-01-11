@@ -102,6 +102,7 @@ def readSbix(ttfont, glyphs):
 
         for glyph in sbix.strikes[size].glyphs.values():
             if glyph.graphicType == 'png ':
+                key = None
                 try:
                     (key, subname) = parseName(glyph.glyphName)
                     text = "" + chr(key) + subname
@@ -109,11 +110,45 @@ def readSbix(ttfont, glyphs):
                 except:
                     text = glyph.glyphName
                     filename = f"{text}.png"
-                print(f"{text} -> {filename}")
 
-                with open(os.path.join(outputDir, filename), "wb") as f: 
-                    f.write(glyph.imageData)
-                glyphs.discard(key)
+                try:
+                    with open(os.path.join(outputDir, filename), "wb") as f: 
+                        f.write(glyph.imageData)
+                    print(f"{text} -> {filename}")
+                    glyphs.discard(key)
+                except Exception as err:
+                    print(f"{text} -> {err}", file=sys.stderr)
+
+def extractSvgGlyph(data, filename):
+    tree = cairosvg.surface.Tree(bytestring=data)
+
+    out = io.BytesIO()
+    surface = cairosvg.surface.PNGSurface(tree, out, 96)
+
+    bbox = None
+    for node in tree.children:
+        b = cairosvg.bounding_box.calculate_bounding_box(surface, node)
+        if b != None:
+            if bbox == None:
+                bbox = b
+                continue
+            cur = convertBoundingBox(bbox)
+            new = convertBoundingBox(b)
+            x = min(cur[0], new[0])
+            y = min(cur[1], new[1])
+            max_x = max(cur[2], new[2])
+            max_y = max(cur[3], new[3])
+            bbox = (x, y, max_x - x, max_y - y)
+
+    if (bbox != None):
+        tree.update({"viewBox": ' '.join([str(value) for value in bbox])})
+        out = io.BytesIO()
+        surface = cairosvg.surface.PNGSurface(tree, out, 96)
+
+    surface.finish()
+
+    with open(os.path.join(outputDir, filename), "wb") as outfile:
+        outfile.write(out.getbuffer())
 
 def extractSvg(ttfont, glyphs):
     svgs = ttfont.get("SVG ")
@@ -121,6 +156,7 @@ def extractSvg(ttfont, glyphs):
         for doc in svgs.docList:
             id = doc.startGlyphID
             name = ttfont.getGlyphName(id)
+            key = None
             try:
                 key = list(cmap.keys())[list(cmap.values()).index(name)]
                 text = "" + chr(key)
@@ -133,39 +169,13 @@ def extractSvg(ttfont, glyphs):
                 except:
                     text = name
                     filename = f"{name}.png"
-            print(f"{text} -> {filename}")
-
-            tree = cairosvg.surface.Tree(bytestring=doc.data)
-
-            out = io.BytesIO()
-            surface = cairosvg.surface.PNGSurface(tree, out, 96)
-
-            bbox = None
-            for node in tree.children:
-                b = cairosvg.bounding_box.calculate_bounding_box(surface, node)
-                if b != None:
-                    if bbox == None:
-                        bbox = b
-                        continue
-                    cur = convertBoundingBox(bbox)
-                    new = convertBoundingBox(b)
-                    x = min(cur[0], new[0])
-                    y = min(cur[1], new[1])
-                    max_x = max(cur[2], new[2])
-                    max_y = max(cur[3], new[3])
-                    bbox = (x, y, max_x - x, max_y - y)
-
-            if (bbox != None):
-                tree.update({"viewBox": ' '.join([str(value) for value in bbox])})
-                out = io.BytesIO()
-                surface = cairosvg.surface.PNGSurface(tree, out, 96)
-
-            surface.finish()
-
-            with open(os.path.join(outputDir, filename), "wb") as outfile:
-                outfile.write(out.getbuffer())
-
-            glyphs.discard(key)
+            
+            try:
+                extractSvgGlyph(doc.data, filename)
+                print(f"{text} -> {filename}")
+                glyphs.discard(key)
+            except Exception as err:
+                print(f"{text} -> {err}", file=sys.stderr)
 
 with TTFont(fontPath, fontNumber=0) as ttfont:
     glyphs = set()
@@ -195,17 +205,16 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
             print(f"{text} -> empty")
             continue
 
-        img = Image.new('RGBA', size=(width, height))
-        d = ImageDraw.Draw(img)
         try:
+            img = Image.new('RGBA', size=(width, height))
+            d = ImageDraw.Draw(img)
+
             d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
-        except OSError as err:
-            print(f"{text} -> {err}")
-            continue
+            while bleed(img): pass
+            clear(img)
+            d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
 
-        while bleed(img): pass
-        clear(img)
-        d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
-
-        print(f"{text} -> {filename}")
-        img.save(os.path.join(outputDir, filename))
+            img.save(os.path.join(outputDir, filename))
+            print(f"{text} -> {filename}")
+        except Exception as err:
+            print(f"{text} -> {err}", file=sys.stderr)
