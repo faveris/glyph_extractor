@@ -16,6 +16,7 @@ parser.add_argument('--output', type=str, help='Path to the output folder', defa
 parser.add_argument('--size', type=int, help='Preferable font size', default=100)
 parser.add_argument('--no-embed-color', action='store_true', help="Don't use embedded colors of a glyph")
 parser.add_argument('--fill-color', type=str, help='Fill color in hex format', default='000000FF')
+parser.add_argument('--glyph', type=str, help='Which glyph to extract', default=None)
 args = parser.parse_args()
 
 fontPath = args.font
@@ -23,6 +24,7 @@ size = args.size
 colored = not args.no_embed_color
 fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
 outputDir = args.output
+whichGlyph = ord(args.glyph) if args.glyph else None
 
 if not os.path.exists(outputDir):
     os.makedirs(outputDir)
@@ -169,7 +171,10 @@ def extractSvg(ttfont, glyphs):
                 except:
                     text = name
                     filename = f"{name}.png"
-            
+
+            if whichGlyph and whichGlyph != key:
+                continue
+
             try:
                 extractSvgGlyph(doc.data, filename)
                 print(f"{text} -> {filename}")
@@ -194,6 +199,9 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
     imagefont = ImageFont.truetype(fontPath, size)
 
     for key in glyphs:
+        if whichGlyph and whichGlyph != key:
+            continue
+
         text = "" + chr(key)
         filename = f"{hex(key)}.png"
 
