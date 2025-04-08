@@ -89,7 +89,7 @@ def readSbix(ttfont, glyphs):
     if sbix != None:
         sizes = list(sbix.strikes.keys())
         sizes.sort()
-        
+
         global size
         size = next((x for x in sizes if x >= size), None)
         if size == None:
@@ -114,7 +114,7 @@ def readSbix(ttfont, glyphs):
                     filename = f"{text}.png"
 
                 try:
-                    with open(os.path.join(outputDir, filename), "wb") as f: 
+                    with open(os.path.join(outputDir, filename), "wb") as f:
                         f.write(glyph.imageData)
                     print(f"{text} -> {filename}")
                     glyphs.discard(key)
@@ -190,7 +190,7 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
 
     if colored:
         extractSvg(ttfont, glyphs)
-    
+
     readSbix(ttfont, glyphs)
 
     if len(glyphs) == 0:
@@ -205,12 +205,14 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
         text = "" + chr(key)
         filename = f"{hex(key)}.png"
 
-        (left, top, right, bottom) = imagefont.getbbox(text)
-        width = right
-        height = bottom
+        try:
+            (left, top, right, bottom) = imagefont.getbbox(text)
 
-        if width <= 0 or height <= 0:
-            print(f"{text} -> empty")
+            if width <= 0 or height <= 0:
+                print(f"{text} -> empty")
+                continue
+        except:
+            print(f"{hex(key)} {text} -> empty (imagefont can't getbbox())")
             continue
 
         try:
