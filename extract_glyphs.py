@@ -113,6 +113,9 @@ def readSbix(ttfont, glyphs):
                     text = glyph.glyphName
                     filename = f"{text}.png"
 
+                if whichGlyph and whichGlyph != key:
+                    continue
+
                 try:
                     with open(os.path.join(outputDir, filename), "wb") as f:
                         f.write(glyph.imageData)
@@ -184,9 +187,12 @@ def extractSvg(ttfont, glyphs):
 
 with TTFont(fontPath, fontNumber=0) as ttfont:
     glyphs = set()
-    cmap = ttfont.getBestCmap()
-    for key in cmap:
-        glyphs.add(key)
+    if whichGlyph:
+        glyphs.add(whichGlyph)                
+    else:
+        cmap = ttfont.getBestCmap()
+        for key in cmap:
+            glyphs.add(key)
 
     if colored:
         extractSvg(ttfont, glyphs)
@@ -199,9 +205,6 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
     imagefont = ImageFont.truetype(fontPath, size)
 
     for key in glyphs:
-        if whichGlyph and whichGlyph != key:
-            continue
-
         text = "" + chr(key)
         filename = f"{hex(key)}.png"
 
