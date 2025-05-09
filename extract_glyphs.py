@@ -207,6 +207,8 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
 
         try:
             (left, top, right, bottom) = imagefont.getbbox(text)
+            width = right
+            height = bottom
 
             if width <= 0 or height <= 0:
                 print(f"{text} -> empty")
