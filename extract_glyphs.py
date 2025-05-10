@@ -75,7 +75,7 @@ def convertBoundingBox(bbox):
     return (x, y, x_max, y_max)
 
 namePattern = re.compile(r'(u|uni)(?P<name>[0-9a-fA-F]+)(?P<subname>.*)')
-def parseName(name):
+def splitName(name):
     match = namePattern.search(name)
     if match != None:
         groups = match.groupdict()
@@ -83,6 +83,42 @@ def parseName(name):
             integer = int(groups['name'], 16)
             subname = groups['subname'] or ''
             return (integer, subname)
+
+def parseName(name):
+    key = None
+    try:
+        (key, subname) = splitName(name)
+        text = "" + chr(key) + subname
+        filename = f"{hex(key) + subname}.png"
+    except:
+        text = name
+        filename = f"{text}.png"    
+    return (key, text, filename)
+
+def extractCbdt(ttfont, glyphs):
+    cbdt = ttfont.get("CBDT")
+    if cbdt != None:
+        png_signature = b"\x89PNG\r\n\x1a\n"
+        for strikeData in cbdt.strikeData:
+            for k, v in strikeData.items():
+                (key, text, filename) = parseName(k)
+
+                if whichGlyph and whichGlyph != key:
+                    continue
+
+                offset = v.data.find(png_signature)
+                if offset == -1:
+                    print(f"{text} -> unsupported format", file=sys.stderr)
+                    continue
+
+                try:
+                    png_data = v.data[offset:]
+                    with open(os.path.join(outputDir, filename), "wb") as f:
+                        f.write(png_data)
+                    print(f"{text} -> {filename}")
+                    glyphs.discard(key)
+                except Exception as err:
+                    print(f"{text} -> {err}", file=sys.stderr)
 
 def readSbix(ttfont, glyphs):
     sbix = ttfont.get("sbix")
@@ -103,26 +139,22 @@ def readSbix(ttfont, glyphs):
             return
 
         for glyph in sbix.strikes[size].glyphs.values():
-            if glyph.graphicType == 'png ':
-                key = None
-                try:
-                    (key, subname) = parseName(glyph.glyphName)
-                    text = "" + chr(key) + subname
-                    filename = f"{hex(key) + subname}.png"
-                except:
-                    text = glyph.glyphName
-                    filename = f"{text}.png"
+            (key, text, filename) = parseName(glyph.glyphName)
 
-                if whichGlyph and whichGlyph != key:
-                    continue
+            if whichGlyph and whichGlyph != key:
+                continue
 
-                try:
-                    with open(os.path.join(outputDir, filename), "wb") as f:
-                        f.write(glyph.imageData)
-                    print(f"{text} -> {filename}")
-                    glyphs.discard(key)
-                except Exception as err:
-                    print(f"{text} -> {err}", file=sys.stderr)
+            if glyph.graphicType != 'png ':
+                print(f"{text} -> unsupported format ({glyph.graphicType})", file=sys.stderr)
+                continue
+
+            try:
+                with open(os.path.join(outputDir, filename), "wb") as f:
+                    f.write(glyph.imageData)
+                print(f"{text} -> {filename}")
+                glyphs.discard(key)
+            except Exception as err:
+                print(f"{text} -> {err}", file=sys.stderr)
 
 def extractSvgGlyph(data, filename):
     tree = cairosvg.surface.Tree(bytestring=data)
@@ -158,6 +190,7 @@ def extractSvgGlyph(data, filename):
 def extractSvg(ttfont, glyphs):
     svgs = ttfont.get("SVG ")
     if svgs != None:
+        cmap = ttfont.getBestCmap()
         for doc in svgs.docList:
             id = doc.startGlyphID
             name = ttfont.getGlyphName(id)
@@ -167,13 +200,7 @@ def extractSvg(ttfont, glyphs):
                 text = "" + chr(key)
                 filename = f"{hex(key)}.png"
             except:
-                try:
-                    (key, subname) = parseName(name)
-                    text = "" + chr(key) + subname
-                    filename = f"{hex(key) + subname}.png"
-                except:
-                    text = name
-                    filename = f"{name}.png"
+                (key, text, filename) = parseName(name)
 
             if whichGlyph and whichGlyph != key:
                 continue
@@ -196,6 +223,7 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
 
     if colored:
         extractSvg(ttfont, glyphs)
+        extractCbdt(ttfont, glyphs)
 
     readSbix(ttfont, glyphs)
 
