@@ -4,6 +4,9 @@ import cairosvg.surface
 import cairosvg.bounding_box
 import argparse
 import io
+import math
+from multiprocessing import Process, freeze_support, cpu_count
+import numpy as np
 import operator
 import os
 import re
@@ -17,6 +20,7 @@ parser.add_argument('--size', type=int, help='Preferable font size', default=100
 parser.add_argument('--no-embed-color', action='store_true', help="Don't use embedded colors of a glyph")
 parser.add_argument('--fill-color', type=str, help='Fill color in hex format', default='000000FF')
 parser.add_argument('--glyph', type=str, help='Which glyph to extract', default=None)
+parser.add_argument('--max-process', type=int, help='Max processes to use', default=None)
 args = parser.parse_args()
 
 fontPath = args.font
@@ -24,39 +28,48 @@ colored = not args.no_embed_color
 fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
 outputDir = args.output
 whichGlyph = ord(args.glyph) if args.glyph else None
+maxProcessCount = args.max_process if args.max_process else cpu_count()
 
 if not os.path.exists(outputDir):
     os.makedirs(outputDir)
 
-def bleed(img):
-    pixels = img.load()
-    edge = set()
-    width = img.size[0]
-    height = img.size[1]
-    for x in range(width):
-        for y in range(height):
-            if pixels[x, y][3] == 255:
-                for i in range(max(0, x - 1), min(x + 2, width)):
-                    for j in range(max(0, y - 1), min(y + 2, height)):
-                        alpha = pixels[i, j][3]
-                        if alpha > 0 and alpha < 255:
-                            edge.add((i, j))
+def bleed(pixels):
+    alpha = pixels[:, :, 3]
+    height, width = alpha.shape
 
-    for (x, y) in edge:
-        color = (0, 0, 0, 0)
+    maskFull = alpha == 255
+    maskPartial = (alpha > 0) & (alpha < 255)
+
+    padded = np.pad(maskFull, pad_width=1, mode='constant', constant_values=0)
+    edgeMask = np.zeros_like(maskPartial, dtype=bool)
+
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            neighbor = padded[1+dy:1+dy+height, 1+dx:1+dx+width]
+            edgeMask |= maskPartial & neighbor
+
+    coords = np.argwhere(edgeMask)
+    if coords.size == 0:
+        return False
+
+    for y, x in coords:
+        sumRgb = np.zeros(3, dtype=np.int32)
         count = 0
-        for i in range(max(0, x - 1), min(x + 2, width)):
-            for j in range(max(0, y - 1), min(y + 2, height)):
-                if (pixels[i, j][3] == 255):
-                    color = tuple(map(operator.add, color, pixels[i, j]))
-                    count += 1
-
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < height and 0 <= nx < width:
+                    if alpha[ny, nx] == 255:
+                        sumRgb += pixels[ny, nx, :3]
+                        count += 1
         if count > 0:
-            color = tuple(map(operator.floordiv, color[:3], (count, count, count)))
-            color = color + (255,)
-            pixels[x, y] = color
+            avg_rgb = (sumRgb // count).astype(np.uint8)
+            pixels[y, x, :3] = avg_rgb
+            pixels[y, x, 3] = 255
 
-    return len(edge) > 0
+    return True
 
 def clear(img):
     pixels = img.load()
@@ -220,34 +233,29 @@ def detectFontSize(ttfont):
 
     return size
 
+def chunkify(lst, numChunks, minChunkSize):
+    total = len(lst)
+    if total < minChunkSize:
+        return [lst]
 
-with TTFont(fontPath, fontNumber=0) as ttfont:
-    glyphs = set()
-    if whichGlyph:
-        glyphs.add(whichGlyph)                
-    else:
-        cmap = ttfont.getBestCmap()
-        for key in cmap:
-            glyphs.add(key)
+    numChunks = min(numChunks, total // minChunkSize)
+    chunkSize = math.ceil(total / numChunks)
 
-    size = detectFontSize(ttfont)
-    if size != args.size:
-        print(f"Using font size {size}")
+    chunks = []
+    for i in range(0, total, chunkSize):
+        chunks.append(lst[i:i + chunkSize])
 
-    if colored:
-        extractSvg(ttfont, glyphs)
-        extractCbdt(ttfont, glyphs)
-        extractSbix(ttfont, glyphs, size)
+    if len(chunks) > 1 and len(chunks[-1]) < minChunkSize:
+        chunks[-2].extend(chunks[-1])
+        chunks.pop()
 
-    if len(glyphs) == 0:
-        sys.exit(0)
+    return chunks
 
-    imagefont = ImageFont.truetype(fontPath, size)
-
+def process_chunk(glyphs, fontPath, fontSize, colored, fillColor, outputDir):
+    imagefont = ImageFont.truetype(fontPath, fontSize)
     for key in glyphs:
-        text = "" + chr(key)
+        text = chr(key)
         filename = f"{hex(key)}.png"
-
         try:
             (left, top, right, bottom) = imagefont.getbbox(text)
             width = right
@@ -261,15 +269,59 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
             d = ImageDraw.Draw(img)
 
             d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
-            if img.getbbox() == None:
+
+            if img.getbbox() is None:
                 print(f"{text} -> empty")
                 continue
 
-            while bleed(img): pass
-            clear(img)
-            d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
+            if colored:
+                pixels = np.array(img)
+                while bleed(pixels):
+                    pass
+                img.paste(Image.fromarray(pixels))
+                clear(img)
+                d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
 
             img.save(os.path.join(outputDir, filename))
             print(f"{text} -> {filename}")
         except Exception as err:
             print(f"{text} -> {err}", file=sys.stderr)
+
+def main():
+    with TTFont(fontPath, fontNumber=0) as ttfont:
+        glyphs = set()
+        if whichGlyph:
+            glyphs.add(whichGlyph)
+        else:
+            cmap = ttfont.getBestCmap()
+            for key in cmap:
+                glyphs.add(key)
+
+        size = detectFontSize(ttfont)
+        if size != args.size:
+            print(f"Using font size {size}")
+
+        if colored:
+            extractSvg(ttfont, glyphs)
+            extractCbdt(ttfont, glyphs)
+            extractSbix(ttfont, glyphs, size)
+
+        if len(glyphs) == 0:
+            sys.exit(0)
+
+        chunks = chunkify(list(glyphs), maxProcessCount, 50)
+        if len(chunks) > 1:
+            processes = []
+            for chunk in chunks:
+                p = Process(target=process_chunk, args=(chunk, fontPath, size, colored, fillColor, outputDir))
+                p.start()
+                processes.append(p)
+
+            for p in processes:
+                p.join()
+        else:
+            process_chunk(chunks[0], fontPath, size, colored, fillColor, outputDir)
+
+if __name__ == "__main__":
+    freeze_support()
+    main()
