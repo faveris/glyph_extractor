@@ -1,7 +1,5 @@
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageFont, ImageDraw
-import cairosvg.surface
-import cairosvg.bounding_box
 import argparse
 import io
 import math
@@ -154,6 +152,11 @@ def extractSbix(ttfont, glyphs, size):
                 print(f"{text} -> {err}", file=sys.stderr)
 
 def extractSvgGlyph(data, filename):
+    # There may be issues with Cairo binaries. 
+    # Use a lazy import here to avoid blocking users who don't need it.
+    import cairosvg.surface
+    import cairosvg.bounding_box
+
     tree = cairosvg.surface.Tree(bytestring=data)
 
     out = io.BytesIO()
