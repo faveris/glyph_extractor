@@ -20,7 +20,6 @@ parser.add_argument('--glyph', type=str, help='Which glyph to extract', default=
 args = parser.parse_args()
 
 fontPath = args.font
-size = args.size
 colored = not args.no_embed_color
 fillColor = struct.unpack('BBBB', bytes.fromhex(args.fill_color))
 outputDir = args.output
@@ -120,24 +119,9 @@ def extractCbdt(ttfont, glyphs):
                 except Exception as err:
                     print(f"{text} -> {err}", file=sys.stderr)
 
-def readSbix(ttfont, glyphs):
+def extractSbix(ttfont, glyphs, size):
     sbix = ttfont.get("sbix")
     if sbix != None:
-        sizes = list(sbix.strikes.keys())
-        sizes.sort()
-
-        global size
-        size = next((x for x in sizes if x >= size), None)
-        if size == None:
-            print(f"Can't open the font with size {args.size}. Possible sizes: {', '.join([str(value) for value in sizes])}", file=sys.stderr)
-            sys.exit(1)
-
-        if size != args.size:
-            print(f"Using font size {size}")
-
-        if not colored:
-            return
-
         for glyph in sbix.strikes[size].glyphs.values():
             (key, text, filename) = parseName(glyph.glyphName)
 
@@ -212,6 +196,31 @@ def extractSvg(ttfont, glyphs):
             except Exception as err:
                 print(f"{text} -> {err}", file=sys.stderr)
 
+def detectFontSize(ttfont):
+    size = args.size
+    sizes = None
+
+    cblc = ttfont.get("CBLC")
+    if cblc != None:
+        sizes = list()
+        for strikeData in cblc.strikes:
+            sizes.append(strikeData.bitmapSizeTable.ppemY)
+
+    sbix = ttfont.get("sbix")
+    if sbix != None:
+        sizes = list(sbix.strikes.keys())
+    
+    if sizes != None:
+        sizes = list(set(sizes))
+        sizes.sort()
+        size = next((x for x in sizes if x >= size), None)
+        if size == None:
+            print(f"Can't open the font with size {args.size}. Possible sizes: {', '.join([str(value) for value in sizes])}. Please try to specify the size using --size parameter.", file=sys.stderr)
+            sys.exit(1)
+
+    return size
+
+
 with TTFont(fontPath, fontNumber=0) as ttfont:
     glyphs = set()
     if whichGlyph:
@@ -221,14 +230,17 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
         for key in cmap:
             glyphs.add(key)
 
+    size = detectFontSize(ttfont)
+    if size != args.size:
+        print(f"Using font size {size}")
+
     if colored:
         extractSvg(ttfont, glyphs)
         extractCbdt(ttfont, glyphs)
-
-    readSbix(ttfont, glyphs)
+        extractSbix(ttfont, glyphs, size)
 
     if len(glyphs) == 0:
-        sys.exit(0);
+        sys.exit(0)
 
     imagefont = ImageFont.truetype(fontPath, size)
 
