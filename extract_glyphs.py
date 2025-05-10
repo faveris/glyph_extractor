@@ -256,15 +256,15 @@ with TTFont(fontPath, fontNumber=0) as ttfont:
             if width <= 0 or height <= 0:
                 print(f"{text} -> empty")
                 continue
-        except:
-            print(f"{hex(key)} {text} -> empty (imagefont can't getbbox())")
-            continue
 
-        try:
             img = Image.new('RGBA', size=(width, height))
             d = ImageDraw.Draw(img)
 
             d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
+            if img.getbbox() == None:
+                print(f"{text} -> empty")
+                continue
+
             while bleed(img): pass
             clear(img)
             d.text((0, 0), text, font=imagefont, embedded_color=colored, fill=fillColor)
